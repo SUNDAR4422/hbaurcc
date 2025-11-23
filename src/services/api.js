@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'https://sundar4422.pythonanywhere.com/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
 // Create axios instance
 const api = axios.create({
@@ -19,9 +19,7 @@ api.interceptors.request.use(
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 // Handle token refresh
@@ -30,11 +28,18 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // Only attempt refresh if it's a 401 and we haven't tried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
       try {
         const refreshToken = localStorage.getItem('refresh_token');
+        
+        // If no refresh token exists, we can't refresh. Reject immediately.
+        if (!refreshToken) {
+            throw new Error("No refresh token available");
+        }
+
         const response = await axios.post(`${API_URL}/auth/refresh/`, {
           refresh: refreshToken,
         });
@@ -43,10 +48,16 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
 
         return api(originalRequest);
+
       } catch (err) {
+        // ❗ FIXED: Graceful failure
+        // We remove tokens so the app knows the user is logged out
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        window.location.href = '/login';
+
+        // We reject the promise so the React Component (UI) can handle the error
+        // e.g., Redirect to login via React Router, or show an error message.
+        // We DO NOT force a browser reload (window.location).
         return Promise.reject(err);
       }
     }
@@ -133,13 +144,15 @@ export const hostelAPI = {
   getWardens: () => api.get('/hostels/wardens/'),
   updateWardenProfile: (id, data) => api.patch(`/hostels/wardens/${id}/`, data),
   deleteWardenProfile: (id) => api.delete(`/hostels/wardens/${id}/`),
-  
-  // Bank Account APIs
-  getBankAccounts: (hostelId = null) => api.get('/hostels/bank-accounts/', { params: hostelId ? { hostel: hostelId } : {} }),
+
+  getBankAccounts: (hostelId = null) =>
+    api.get('/hostels/bank-accounts/', { params: hostelId ? { hostel: hostelId } : {} }),
   createBankAccount: (data) => api.post('/hostels/bank-accounts/', data),
   updateBankAccount: (id, data) => api.put(`/hostels/bank-accounts/${id}/`, data),
   deleteBankAccount: (id) => api.delete(`/hostels/bank-accounts/${id}/`),
-};// Audit APIs
+};
+
+// Audit APIs
 export const auditAPI = {
   getLogs: () => api.get('/audit/logs/'),
   getMyLogs: () => api.get('/audit/logs/my/'),
